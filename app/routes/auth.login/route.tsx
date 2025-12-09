@@ -30,12 +30,27 @@ export default function Auth() {
   // Check if we're in an iframe and redirect to top level if needed
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const inIframe = window.top !== window.self;
-      setIsInIframe(inIframe);
-      
-      // If in iframe, redirect the top window to this URL
-      if (inIframe && window.top) {
-        window.top.location.href = window.location.href;
+      try {
+        const inIframe = window.top !== window.self;
+        setIsInIframe(inIframe);
+        
+        // If in iframe, try to redirect the top window to this URL
+        // Only works if same-origin, will fail silently if cross-origin
+        if (inIframe && window.top) {
+          try {
+            // Check if we can access window.top.location (same-origin check)
+            const topLocation = window.top.location;
+            // If we get here, we're same-origin, so redirect is safe
+            topLocation.href = window.location.href;
+          } catch (e) {
+            // Cross-origin iframe - can't break out, this is expected for Shopify embedded apps
+            // The Form has target="_top" which will handle the redirect properly
+            setIsInIframe(false);
+          }
+        }
+      } catch (e) {
+        // Silently handle any errors
+        setIsInIframe(false);
       }
     }
   }, []);

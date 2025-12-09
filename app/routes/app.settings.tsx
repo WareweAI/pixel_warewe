@@ -21,7 +21,7 @@ import {
   Box,
   Divider,
 } from "@shopify/polaris";
-// ClientOnly removed - Polaris components work with SSR
+import { ClientOnly } from "~/components/ClientOnly";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);

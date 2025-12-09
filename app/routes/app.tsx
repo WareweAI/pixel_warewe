@@ -8,6 +8,10 @@ import enTranslations from "@shopify/polaris/locales/en.json";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  if (!authenticate) {
+    throw new Response("Shopify configuration not found", { status: 500 });
+  }
+  
   await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef

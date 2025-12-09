@@ -26,6 +26,10 @@ import {
 import { ClientOnly } from "~/components/ClientOnly";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  if (!authenticate) {
+    throw new Response("Shopify configuration not found", { status: 500 });
+  }
+  
   const { session, redirect } = await authenticate.admin(request);
   const shop = session.shop;
 
@@ -54,16 +58,71 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { createdAt: "desc" },
   });
 
-  // Redirect to analytics as the default view if apps exist
-  // This uses Shopify's redirect method which works properly in embedded apps
-  if (apps.length > 0) {
-    return redirect("/app/analytics");
-  }
+  // Calculate aggregated dashboard stats
+  const totalPixels = apps.length;
+  const totalEvents = apps.reduce((sum, app) => sum + app._count.events, 0);
+  const totalSessions = apps.reduce((sum, app) => sum + app._count.analyticsSessions, 0);
+  
+  // Get recent events across all apps (last 7 days)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  const recentEvents = await prisma.event.findMany({
+    where: {
+      app: {
+        userId: user.id,
+      },
+      createdAt: { gte: sevenDaysAgo },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    include: {
+      app: {
+        select: { name: true, appId: true },
+      },
+    },
+  });
 
-  return { shop, userId: user.id, apps };
+  // Calculate today's stats
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const todayEvents = await prisma.event.count({
+    where: {
+      app: {
+        userId: user.id,
+      },
+      createdAt: { gte: today },
+    },
+  });
+
+  // Always show the dashboard at /app
+  return { 
+    shop, 
+    userId: user.id, 
+    apps,
+    stats: {
+      totalPixels,
+      totalEvents,
+      totalSessions,
+      todayEvents,
+    },
+    recentEvents: recentEvents.map(e => ({
+      id: e.id,
+      eventName: e.eventName,
+      url: e.url,
+      appName: e.app.name,
+      appId: e.app.appId,
+      createdAt: e.createdAt,
+    })),
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  if (!authenticate) {
+    throw new Response("Shopify configuration not found", { status: 500 });
+  }
+  
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const formData = await request.formData();
@@ -137,7 +196,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Index() {
-  const { apps } = useLoaderData<typeof loader>();
+  const { apps, stats, recentEvents } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
   const [selectedApp, setSelectedApp] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -322,34 +381,122 @@ export default function Index() {
       }
     >
       <Page
-        title="Pixel Analytics"
+        title="Dashboard"
         primaryAction={{
           content: "Create Pixel",
           onAction: () => setShowCreateModal(true),
         }}
       >
         <Layout>
-          {apps.length === 0 ? (
+          {/* Dashboard Overview Stats */}
+          <Layout.Section>
+            <BlockStack gap="400">
+              <Text variant="headingLg" as="h2">
+                Overview
+              </Text>
+              <InlineStack gap="400" wrap={false}>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" as="p" tone="subdued">
+                      Total Pixels
+                    </Text>
+                    <Text variant="headingXl" as="p">
+                      {stats.totalPixels}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" as="p" tone="subdued">
+                      Total Events
+                    </Text>
+                    <Text variant="headingXl" as="p">
+                      {stats.totalEvents.toLocaleString()}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" as="p" tone="subdued">
+                      Total Sessions
+                    </Text>
+                    <Text variant="headingXl" as="p">
+                      {stats.totalSessions.toLocaleString()}
+                    </Text>
+                  </BlockStack>
+                </Card>
+                <Card>
+                  <BlockStack gap="200">
+                    <Text variant="bodySm" as="p" tone="subdued">
+                      Events Today
+                    </Text>
+                    <Text variant="headingXl" as="p">
+                      {stats.todayEvents.toLocaleString()}
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </InlineStack>
+            </BlockStack>
+          </Layout.Section>
+
+          {/* Recent Events */}
+          {recentEvents.length > 0 && (
             <Layout.Section>
               <Card>
-                <EmptyState
-                  heading="No tracking pixels yet"
-                  action={{
-                    content: "Create Your First Pixel",
-                    onAction: () => setShowCreateModal(true),
-                  }}
-                  image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-                >
-                  <p>
-                    Create your first tracking pixel with Meta Pixel integration
-                    to start collecting analytics data.
-                  </p>
-                </EmptyState>
+                <BlockStack gap="400">
+                  <Text variant="headingMd" as="h3">
+                    Recent Events
+                  </Text>
+                  <BlockStack gap="200">
+                    {recentEvents.map((event: any) => (
+                      <InlineStack key={event.id} align="space-between" blockAlign="center">
+                        <BlockStack gap="100">
+                          <InlineStack gap="200" blockAlign="center">
+                            <Badge>{event.eventName}</Badge>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {event.appName}
+                            </Text>
+                          </InlineStack>
+                          {event.url && (
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {new URL(event.url).pathname}
+                            </Text>
+                          )}
+                        </BlockStack>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          {new Date(event.createdAt).toLocaleString()}
+                        </Text>
+                      </InlineStack>
+                    ))}
+                  </BlockStack>
+                </BlockStack>
               </Card>
             </Layout.Section>
-          ) : (
-            <>
-              <Layout.Section>
+          )}
+
+          {/* Pixels List */}
+          <Layout.Section>
+            <BlockStack gap="400">
+              <Text variant="headingLg" as="h2">
+                Your Pixels
+              </Text>
+              {apps.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    heading="No tracking pixels yet"
+                    action={{
+                      content: "Create Your First Pixel",
+                      onAction: () => setShowCreateModal(true),
+                    }}
+                    image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                  >
+                    <p>
+                      Create your first tracking pixel with Meta Pixel integration
+                      to start collecting analytics data.
+                    </p>
+                  </EmptyState>
+                </Card>
+              ) : (
                 <Card>
                   <ResourceList
                     resourceName={{ singular: "pixel", plural: "pixels" }}
@@ -376,11 +523,11 @@ export default function Index() {
                               </BlockStack>
                               <InlineStack gap="200">
                                 {settings?.metaPixelEnabled ? (
-                                  <Button primary url={`/app/analytics?appId=${appId}`}>
+                                  <Button variant="primary" url={`/app/analytics?appId=${appId}`}>
                                     Go to Dashboard
                                   </Button>
                                 ) : (
-                                  <Button primary onClick={() => setShowCreateModal(true)}>
+                                  <Button variant="primary" onClick={() => setShowCreateModal(true)}>
                                     Connect Meta
                                   </Button>
                                 )}
@@ -416,9 +563,12 @@ export default function Index() {
                     }}
                   />
                 </Card>
-              </Layout.Section>
+              )}
+            </BlockStack>
+          </Layout.Section>
 
-              {selectedApp && analytics && (
+          {/* Detailed Analytics for Selected Pixel */}
+          {selectedApp && analytics && (
                 <Layout.Section>
                   <BlockStack gap="400">
                     <Text variant="headingLg" as="h2">
@@ -516,8 +666,6 @@ export default function Index() {
                   </BlockStack>
                 </Layout.Section>
               )}
-            </>
-          )}
         </Layout>
 
         {/* Create Modal */}

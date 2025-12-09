@@ -1,8 +1,18 @@
+import { redirect, type LoaderFunctionArgs } from "react-router";
 import { Form } from "react-router";
 import styles from "./style.module.css";
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const url = new URL(request.url);
+
+  if (url.searchParams.get("shop")) {
+    throw redirect(`/app?${url.searchParams.toString()}`);
+  }
+
+  return { showForm: true };
+};
+
 export default function App() {
-  // Always show the form on the landing page
   const showForm = true;
   
 
