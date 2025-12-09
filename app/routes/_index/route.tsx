@@ -1,19 +1,16 @@
 import { redirect, Form, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
+import { login } from "../../shopify.server";
 import styles from "./style.module.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
 
-  // If shop parameter exists, redirect to app (auth will be handled by /app route)
-  if (shop) {
-    throw redirect(`/app?shop=${shop}`);
+  if (url.searchParams.get("shop")) {
+    throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
-  // Always show form for landing page
-  // The form will submit to /auth/login which handles Shopify OAuth
-  return { showForm: true };
+  return { showForm: Boolean(login) };
 };
 
 export default function App() {
